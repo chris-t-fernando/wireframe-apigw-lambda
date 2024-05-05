@@ -3,19 +3,30 @@ variable "stage_name" {
   type    = string
 }
 
-resource "aws_cloudwatch_log_group" "wf_api_logs" {
-  name              = "API-Gateway-Execution-Logs_${aws_api_gateway_rest_api.wf_api.id}/${var.stage_name}"
-  retention_in_days = 7
-  # ... potentially other configuration ...
-}
+#resource "aws_cloudwatch_log_group" "wf_api_logs" {
+#  name              = "API-Gateway-Execution-Logs_blah_${aws_api_gateway_rest_api.wf_api.id}/${var.stage_name}"
+#  retention_in_days = 7
+#  # ... potentially other configuration ...
+#}
 
 resource "aws_api_gateway_stage" "wf_api_stage_dev" {
   rest_api_id = aws_api_gateway_rest_api.wf_api.id
   deployment_id = aws_api_gateway_deployment.wf_api_deployment.id
-  depends_on = [aws_cloudwatch_log_group.wf_api_logs]
+  #depends_on = [aws_cloudwatch_log_group.wf_api_logs]
 
   stage_name = var.stage_name
   # ... other configuration ...
+}
+
+resource "aws_api_gateway_method_settings" "method_settings" {
+  rest_api_id = "${aws_api_gateway_rest_api.wf_api.id}"
+  stage_name  = "${aws_api_gateway_stage.wf_api_stage_dev.stage_name}"
+  method_path = "*/*"
+  settings {
+    logging_level = "INFO"
+    data_trace_enabled = true
+    metrics_enabled = true
+  }
 }
 
 resource "aws_api_gateway_rest_api" "wf_api" {
@@ -147,12 +158,24 @@ resource "aws_api_gateway_deployment" "deployment" {
   ]
 
   rest_api_id = aws_api_gateway_rest_api.wf_api.id
-  stage_name = "dev"
+  #stage_name = "dev"
 }
 
 
 
+resource "aws_iam_role_policy_attachment" "lambda_basic" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role = aws_iam_role.lambda_role.name
+}
 
+resource "aws_lambda_permission" "apigw_lambda" {
+  statement_id = "AllowExecutionFromAPIGateway"
+  action = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.test_lambda_function.function_name
+  principal = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_api_gateway_rest_api.wf_api.execution_arn}/*/*/*"
+}
 
 
 
@@ -213,4 +236,14 @@ resource "aws_iam_role" "cloudwatch" {
   ]
 }
 EOF
+}
+
+
+data "aws_iam_policy" "AmazonAPIGatewayPushToCloudWatchLogs" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+}
+
+resource "aws_iam_role_policy_attachment" "apigw_cloudwatch_attachment" {
+  role       = "${aws_iam_role.cloudwatch.name}"
+  policy_arn = "${data.aws_iam_policy.AmazonAPIGatewayPushToCloudWatchLogs.arn}"
 }
