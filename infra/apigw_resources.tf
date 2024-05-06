@@ -1,56 +1,3 @@
-variable "stage_name" {
-  default = "dev"
-  type    = string
-}
-
-variable "lambda_name" {
-  default = "test_lambda"
-  type    = string
-}
-
-
-
-### GW INSTANCE
-
-# root API gateway resource
-resource "aws_api_gateway_rest_api" "wf_api" {
-  name        = "wf_api"
-  description = "Wireframe API Gateway"
-
-  endpoint_configuration {
-    types = ["REGIONAL"]
-  }
-}
-
-# CloudWatch logging is set at the stage level, so explicitly instantiate one so we can attach method settings
-# rest api > GW stage > GW method settings.cloudwatch config
-resource "aws_api_gateway_stage" "wf_api_stage_dev" {
-  rest_api_id   = aws_api_gateway_rest_api.wf_api.id
-  deployment_id = aws_api_gateway_deployment.wf_api_deployment.id
-  stage_name    = var.stage_name
-  depends_on    = [aws_cloudwatch_log_group.wf_cw_logs]
-}
-
-# define gw method settings so we can set CW config
-resource "aws_api_gateway_method_settings" "method_settings" {
-  rest_api_id = aws_api_gateway_rest_api.wf_api.id
-  stage_name  = aws_api_gateway_stage.wf_api_stage_dev.stage_name
-  method_path = "*/*"
-  settings {
-    logging_level      = "INFO"
-    data_trace_enabled = true
-    metrics_enabled    = true
-  }
-}
-
-resource "aws_cloudwatch_log_group" "wf_cw_logs" {
-  name              = "API-Gateway-Execution-Logs_${aws_api_gateway_rest_api.wf_api.id}/${var.stage_name}"
-  retention_in_days = 1
-
-}
-
-
-
 ### resources to run on the GW
 
 # define GW resources and config explained well at
@@ -58,7 +5,7 @@ resource "aws_cloudwatch_log_group" "wf_cw_logs" {
 resource "aws_api_gateway_resource" "root" {
   rest_api_id = aws_api_gateway_rest_api.wf_api.id
   parent_id   = aws_api_gateway_rest_api.wf_api.root_resource_id
-  path_part   = "wf_path_1"
+  path_part   = var.project_name
 }
 
 resource "aws_api_gateway_deployment" "wf_api_deployment" {
@@ -232,13 +179,13 @@ resource "aws_lambda_permission" "apigw_lambda" {
 data "archive_file" "python_lambda_package" {
   type        = "zip"
   source_file = "${path.module}/../app/lambda_function.py"
-  output_path = "${var.lambda_name}.zip"
+  output_path = "${path.module}/../app/${var.project_name}.zip"
 }
 
 # create the lambda function
 resource "aws_lambda_function" "wf_lambda_function" {
-  function_name    = var.lambda_name
-  filename         = "${var.lambda_name}.zip"
+  function_name    = var.project_name
+  filename         = "${path.module}/../app/${var.project_name}.zip"
   source_code_hash = data.archive_file.python_lambda_package.output_base64sha256
   role             = aws_iam_role.lambda_role.arn
   runtime          = "python3.10"
@@ -249,7 +196,7 @@ resource "aws_lambda_function" "wf_lambda_function" {
 
 # CW execution log retention for the lambda function
 resource "aws_cloudwatch_log_group" "lambda_log_group" {
-  name              = "/aws/lambda/${var.lambda_name}"
+  name              = "/aws/lambda/${var.project_name}"
   retention_in_days = 1
   lifecycle {
     prevent_destroy = false
